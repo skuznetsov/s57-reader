@@ -8,7 +8,10 @@
             "type": "node",
             "request": "launch",
             "name": "Launch Program",
-            "program": "${workspaceFolder}/app.js"
+            "program": "${workspaceFolder}/app.js",
+            "args": [
+                "data/ENC_ROOT/US1WC01M/US1WC01M.000"
+            ]
         }
     ]
 }
