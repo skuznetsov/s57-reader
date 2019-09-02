@@ -15,5 +15,9 @@
     "reader"
   ],
   "author": "Sergey Kuznetsov <github@rigelstar.com>",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^7.0.0-beta.3",
+    "electron-builder": "^21.2.0"
+  }
 }
