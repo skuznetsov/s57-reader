@@ -3,12 +3,13 @@ const {app, BrowserWindow, ipcMain} = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const MapReader = require('./lib/MapReader');
+const CatalogReader = require('./lib/CatalogReader');
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
 let mainWindow = null;
 
-function createWindow () {
+async function createWindow () {
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -23,10 +24,10 @@ function createWindow () {
   // and load the index.html of the app.
   mainWindow.loadFile('views/index.html');
 
-  ipcMain.on('loadMap', function (event, args) {
+  ipcMain.on('loadMap', async function (event, args) {
     let loader = new MapReader({filename: args.filename});
     console.time("loader.read()");
-    chart = loader.read(args.Layers);
+    chart = await loader.read(args.Layers);
     console.timeEnd("loader.read()");
     event.reply('mapLoaded', chart);
   });
@@ -35,6 +36,15 @@ function createWindow () {
     let dirNames = await fs.readdir('./data/ENC_ROOT');
     event.reply('tileNamesLoaded', dirNames);
   });
+
+  // let catalogReader = new CatalogReader({debug: false});
+  // let catalog = await catalogReader.read();
+  // catalog.root.children.forEach(el => { delete el.children; delete el.siblings; });
+  // ipcMain.on('loadCatalog', function (event, args) {
+  //   event.reply('catalogLoaded', catalog);
+  // });
+
+
 
 
   // Open the DevTools.
