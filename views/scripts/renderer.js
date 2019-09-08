@@ -1,9 +1,5 @@
 const { ipcRenderer } = require('electron');
 
-let ctx = null;
-let canvas = null;
-let tileSelector = null;
-
 let colorClass = {
     "NODTA": xyZtoRGB(0.2800, 0.3100, 40.000),
     "CURSR": xyZtoRGB(0.5000, 0.4000, 32.000),
@@ -96,170 +92,359 @@ function xyZtoRGB(_x, _y, _z) {
     return color;
 }
 
-function setupEnvironment() {
-    canvas = document.getElementById('mapArea');
-    if (!canvas) {
-        alert('No canvas element was found.');
+const INITIAL_SCALE = 100;
+const STEP_MULTIPLIER = 0.25;
+
+class MapRenderer {
+    constructor() {
+        this.chart = null;
+        this.ctx = null;
+        this.canvas = null;
+        this.tileSelector = null;
+        this.mapX = 0;
+        this.mapY = 0;
+        this.mapScale = INITIAL_SCALE;
+        this.isReady = false;
+        this.isMouseDown = false;
+        this.lastMouseX = 0;
+        this.lastMouseY = 0;
     }
-    ctx = canvas.getContext('2d');
-    tileSelector = document.getElementById('tileNames');
-    tileSelector.addEventListener('change', function(event) {
-        let tileName = tileSelector.options[tileSelector.selectedIndex].text;
+    
+    setupEnvironment() {
+        this.canvas = document.getElementById('mapArea');
+        if (!this.canvas) {
+            alert('No canvas element was found.');
+            return;
+        }
+        this.ctx = this.canvas.getContext('2d');
+        this.tileSelector = document.getElementById('tileNames');
+        this.tileSelector.addEventListener('change', this.onSelectChange.bind(this));
+
+        this.canvas.addEventListener('wheel', this.zoom.bind(this));
+        this.canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
+        this.canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
+        this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+
+        ipcRenderer.on('tileNamesLoaded', this.onTileNamesLoaded.bind(this));
+        ipcRenderer.on('mapLoaded', this.onMapLoaded.bind(this));
+
+        ipcRenderer.send('loadTileNames');
+    }
+    
+    onSelectChange (event) {
+        let tileName = this.tileSelector.options[this.tileSelector.selectedIndex].text;
         let filename = `data/ENC_ROOT/${tileName}/${tileName}.000`;
-        requestMap(filename);
-    });
+        this.mapScale = INITIAL_SCALE;
+        this.requestMap(filename);
+    }
+
+    zoom(event) {
+        event.preventDefault();
+        this.mapScale += ~~event.deltaY * STEP_MULTIPLIER;
+        // Restrict scale
+        this.mapScale = Math.min(Math.max(1, this.mapScale), 10000);
+        this.renderMap();
+    }
+
+    onMouseUp(event) {
+        event.preventDefault();
+        this.lastMouseX = 0;
+        this.lastMouseY = 0;
+        this.isMouseDown = false;
+    }
+
+    onMouseDown(event) {
+        event.preventDefault();
+        this.lastMouseX = event.layerX;
+        this.lastMouseY = event.layerY;
+        this.isMouseDown = true;
+    }
+
+    onMouseMove(event) {
+        if (this.isMouseDown) {
+            let offsetX = this.lastMouseX - event.layerX;
+            let offsetY = this.lastMouseY - event.layerY;
+            this.lastMouseX = event.layerX;
+            this.lastMouseY = event.layerY;
+            this.mapTopX = Math.max(0, Math.min(this.mapTopX + offsetX * this.mapScale, this.chart.SECorner.X)); // TODO: offset to the size of the screen
+            this.mapTopY = Math.max(0, Math.min(this.mapTopY + offsetY * this.mapScale, this.chart.SECorner.Y)); // TODO: offset to the size of the screen
+            this.renderMap();
+            event.preventDefault();
+        }
+    }
+
+    onTileNamesLoaded(event, result) {
+        this.tileSelector.options.length = 0;
+        for(let idx = 0; idx < result.length; idx++) {
+            var opt = document.createElement("option");
+            opt.value = idx;
+            opt.innerHTML = result[idx];
+         
+            this.tileSelector.appendChild(opt);
+        }
+    }
+    
+    onMapLoaded (event, result) {
+        console.timeEnd("Map load by renderer");
+        this.chart = result;
+        let bbox = this.getChartBoundingBox(this.chart);
+        this.chart.NWCorner = bbox.NWCorner;
+        this.chart.SECorner = bbox.SECorner;
+        this.mapTopX = this.chart.NWCorner.X;
+        this.mapTopY = this.chart.NWCorner.Y;
+        this.renderMap();
+    }
+
     // ipcRenderer.send('loadCatalog');
     // ipcRenderer.on('catalogLoaded', function (event, catalog) {
     //     renderCatalog(catalog);
     // });
-    ipcRenderer.send('loadTileNames');
-    ipcRenderer.on('tileNamesLoaded', function (event, result) {
-        tileSelector.options.length = 0;
-        for(let idx = 0; idx < result.length; idx++) {
-            var opt = document.createElement("option");
-            opt.value = idx;
-            opt.innerHTML = result[idx]; // whatever property it has
-         
-            // then append it to the select element
-            tileSelector.appendChild(opt);
+
+    getChartBoundingBox(chart) {
+        let bbox = {
+            NWCorner: {X: 99999999, Y: 99999999},
+            SECorner: {X: 0, Y: 0}
+        };
+        for (let feature in this.chart.Features) {
+            for (let segment of this.chart.Features[feature]) {
+                for (let child of segment.Children) {
+                    this.getBoundingBox(child.Points, bbox);
+                }
+            }      
         }
-    })
-    
-    ipcRenderer.on('mapLoaded', function (event, result) {
-        console.timeEnd("Map load by renderer");
-        renderMap(result);
-    })
-}
-
-function getBoundingBox(chart) {
-    let bbox = {
-        NWCorner: {X: 99999999, Y: 99999999},
-        SECorner: {X: 0, Y: 0}
-    };
-    for(let feature in chart.Features) {
-        chart.Features[feature].forEach(function(segment) {
-            segment.Children.forEach(function(child) {
-                for (let pt of child.Points) {
-                    bbox.NWCorner.X = Math.min(bbox.NWCorner.X, pt.X);
-                    bbox.NWCorner.Y = Math.min(bbox.NWCorner.Y, pt.Y);
-                    bbox.SECorner.X = Math.max(bbox.SECorner.X, pt.X);
-                    bbox.SECorner.Y = Math.max(bbox.SECorner.Y, pt.Y);
-                }
-            });
-        });        
+        bbox.width = bbox.SECorner.X - bbox.NWCorner.X;
+        bbox.height = bbox.SECorner.Y - bbox.NWCorner.Y;
+        return bbox;
     }
-    return bbox;
-}
 
-function renderMap(chart) {
-    let bbox = getBoundingBox(chart);
-    let xMapper = canvas.width / (bbox.SECorner.X - bbox.NWCorner.X);
-    let yMapper = canvas.height / (bbox.SECorner.Y - bbox.NWCorner.Y);
-    let ratio = canvas.width / canvas.height;
-    // if (ratio >= 1) {
-    //     yMapper = xMapper * ratio;
-    // } else {
-    //     xMapper = yMapper / ratio;
-    // }
-    let points = [];
+    getBoundingBox(points, bbox) {
+        for (let pt of points) {
+            bbox.NWCorner.X = Math.min(bbox.NWCorner.X, pt.X);
+            bbox.NWCorner.Y = Math.min(bbox.NWCorner.Y, pt.Y);
+            bbox.SECorner.X = Math.max(bbox.SECorner.X, pt.X);
+            bbox.SECorner.Y = Math.max(bbox.SECorner.Y, pt.Y);
+        }
+        return bbox;
+    }
 
-    console.time("Renderer");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    renderMap() {
+        let points = [];
+        let screenBBox = {
+            NWCorner: {
+                X: this.mapTopX,
+                Y: this.mapTopY
+            }, 
+            SECorner: {
+                X: this.mapTopX + this.canvas.width * this.mapScale,
+                Y: this.mapTopY + this.canvas.height * this.mapScale
+            }
+        };
 
-    // COALNE, SLCONS, BUAARE, DEPARE
-    for(let feature in chart.Features) {
-        let color = colorClass[layerToColorClass[feature]];
-        chart.Features[feature].forEach(function(segment) {
-            ctx.fillStyle = color;
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1;
-            let isFirstPoint = true;
-            ctx.beginPath();
-            let prevX = 0, prevY = 0;
-            segment.Children.forEach(function(child) {
-                // if (child.Usage == 3) {
-                //     return;
-                // }
-                if (child.Orientation == 2) {
-                    points = child.Points.reverse();
-                } else {
-                    points = child.Points;
-                }
-                for (let pt of points) {
-                    let x = ~~((pt.X - bbox.NWCorner.X) * xMapper);
-                    let y = ~~((pt.Y - bbox.NWCorner.Y) * yMapper);
-                    if (isFirstPoint) {
-                        isFirstPoint = false;
-                        ctx.moveTo(x, y);
-                    } else if (x != prevX || y != prevY) {
-                        ctx.lineTo(x, y);
-                        prevX = x;
-                        prevY = y;
+        console.time("Renderer");
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        for (let feature in this.chart.Features) {
+            let color = colorClass[layerToColorClass[feature]];
+            for (let segment of this.chart.Features[feature]) {
+                this.ctx.fillStyle = color;
+                this.ctx.strokeStyle = color;
+                this.ctx.lineWidth = 1;
+                let isFirstPoint = true;
+                this.ctx.beginPath();
+                let prevX = 0, prevY = 0;
+                for (let child of segment.Children) {
+                    let bbox = {
+                        NWCorner: {X: 99999999, Y: 99999999},
+                        SECorner: {X: 0, Y: 0}
+                    };
+            
+                    if (child.Orientation == 2) {
+                        points = child.Points.reverse();
+                    } else {
+                        points = child.Points;
+                    }
+                    this.getBoundingBox(points, bbox);
+
+                    if (this.areaInsideOrIntersectsArea(bbox, screenBBox)) {
+                        let prevPt = null;
+                        for (let pt of points) {
+                            let pt1 = {X: 0, Y: 0};
+                            pt1.X = ~~((pt.X - this.mapTopX) / this.mapScale);
+                            pt1.Y = ~~((pt.Y - this.mapTopY) / this.mapScale);
+                            // x = Math.max(0, Math.min(this.canvas.width, x));
+                            // y = Math.max(0, Math.min(this.canvas.height, y));
+                            if (prevPt) {
+                                let ln = [prevPt, pt1];
+                                ln = this.calculateInterceptOfLineAndBox(ln, [{X:0, Y:0}, {X: this.canvas.width, Y: this.canvas.height}]);
+                                if (ln == null) {
+                                    continue;
+                                }
+                                pt1 = ln[1];
+                            }
+                            prevPt = pt1;
+                            if (isFirstPoint) {
+                                isFirstPoint = false;
+                                this.ctx.moveTo(pt1.X, pt1.Y);
+                            } else if (pt1.X != prevX || pt1.Y != prevY) {
+                                this.ctx.lineTo(pt1.X, pt1.Y);
+                                prevX = pt1.X;
+                                prevY = pt1.Y;
+                            }
+                        }
                     }
                 }
-            });
-            ctx.closePath();
-            if (segment.Geometry == 3) {
-                ctx.fill();
-                ctx.stroke();
-            } else {
-                ctx.stroke();
+                this.ctx.closePath();
+                if (segment.Geometry == 3) {
+                    this.ctx.fill();
+                    this.ctx.stroke();
+                } else {
+                    this.ctx.stroke();
+                }
             }
-    });        
-    }
-// ctx.closePath();
-    // ctx.stroke();
-    console.timeEnd("Renderer");
-}
-
-function renderChartBox(chart) {
-
-}
-
-
-function renderCatalog(catalog) {
-    let bbox = {
-        NWCorner: {X: 99999999, Y: 99999999},
-        SECorner: {X: 0, Y: 0}
-    };
-
-    for (let chartBox in catalog.root.children) {
-        bbox.NWCorner.X = Math.min(bbox.NWCorner.X, chartBox.NWCorner.X);
-        bbox.NWCorner.Y = Math.min(bbox.NWCorner.Y, chartBox.NWCorner.Y);
-        bbox.SECorner.X = Math.max(bbox.SECorner.X, chartBox.SECorner.X);
-        bbox.SECorner.Y = Math.max(bbox.SECorner.Y, chartBox.SECorner.Y);
+        }
+        console.timeEnd("Renderer");
     }
 
-    let xMapper = canvas.width / (bbox.SECorner.X - bbox.NWCorner.X);
-    let yMapper = canvas.height / (bbox.SECorner.Y - bbox.NWCorner.Y);
-    let ratio = canvas.width / canvas.height;
-    if (ratio >= 1) {
-        yMapper = xMapper / ratio;
-    } else {
-        xMapper = yMapper * ratio;
+    renderChartBox(chart) {
+
     }
 
-    console.time("Renderer");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    for (let chartBox in catalog.root.children) {
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(chartBox.NWCorner.X * xMapper, chartBox.NWCorner.Y * yMapper);
-        ctx.lineTo(chartBox.SECorner.X * xMapper, chartBox.NWCorner.Y * yMapper);
-        ctx.lineTo(chartBox.SECorner.X * xMapper, chartBox.SECorner.Y * yMapper);
-        ctx.closePath();
-        ctx.stroke();
+    renderCatalog(catalog) {
+        let bbox = {
+            NWCorner: {X: 99999999, Y: 99999999},
+            SECorner: {X: 0, Y: 0}
+        };
+
+        for (let chartBox in catalog.root.children) {
+            bbox.NWCorner.X = Math.min(bbox.NWCorner.X, chartBox.NWCorner.X);
+            bbox.NWCorner.Y = Math.min(bbox.NWCorner.Y, chartBox.NWCorner.Y);
+            bbox.SECorner.X = Math.max(bbox.SECorner.X, chartBox.SECorner.X);
+            bbox.SECorner.Y = Math.max(bbox.SECorner.Y, chartBox.SECorner.Y);
+        }
+
+        let xMapper = this.canvas.width / (bbox.SECorner.X - bbox.NWCorner.X);
+        let yMapper = this.canvas.height / (bbox.SECorner.Y - bbox.NWCorner.Y);
+        let ratio = this.canvas.width / this.canvas.height;
+        if (ratio >= 1) {
+            yMapper = xMapper / ratio;
+        } else {
+            xMapper = yMapper * ratio;
+        }
+
+        console.time("Renderer");
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        for (let chartBox in catalog.root.children) {
+            this.ctx.strokeStyle = "red";
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.moveTo(chartBox.NWCorner.X * xMapper, chartBox.NWCorner.Y * yMapper);
+            this.ctx.lineTo(chartBox.SECorner.X * xMapper, chartBox.NWCorner.Y * yMapper);
+            this.ctx.lineTo(chartBox.SECorner.X * xMapper, chartBox.SECorner.Y * yMapper);
+            this.ctx.closePath();
+            this.ctx.stroke();
+        }
+        console.timeEnd("Renderer");
     }
-    console.timeEnd("Renderer");
+
+    requestMap(filename) {
+        console.time("Map load by renderer");
+        ipcRenderer.send('loadMap', {filename, Layers: ["LNDARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"]}); // "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
+    }
+
+    pointInsideArea(pt, obj) {
+        let pt1 = obj.NWCorner || obj[0];
+        let pt2 = obj.SECorner || obj[1];
+        if (pt1.X <= pt.X && pt.X <= pt2.X &&
+            pt1.Y <= pt.Y && pt.Y <= pt2.Y) {
+                return true;
+        }
+        return false;
+    }
+
+    areaInsideOrIntersectsArea(obj1, obj2) {
+        let pt1 = obj1.NWCorner || obj1[0];
+        let pt2 = obj1.SECorner || obj1[1];
+        if (this.pointInsideArea(pt1, obj2) ||
+            this.pointInsideArea(pt2, obj2)) {
+            return true;
+        }
+        return false;
+    }
+
+    areaInsideArea(obj1, obj2) {
+        let pt1 = obj1.NWCorner || obj1[0];
+        let pt2 = obj1.SECorner || obj1[1];
+        if (this.pointInsideArea(pt1, obj2) &&
+            this.pointInsideArea(pt2, obj2)) {
+            return true;
+        }
+        return false;
+    }
+
+    isAreaIntersects(obj1, obj2) {
+        let pt1 = obj1.NWCorner || obj1[0];
+        let pt2 = obj1.SECorner || obj1[1];
+        if (this.pointInsideArea(pt1, obj2) ^
+            this.pointInsideArea(pt2, obj2)) {
+            return true;
+        }
+        return false;
+    }
+
+    calculateInterceptOfLineAndBox(ln, box) {
+        let pt1 = ln[0].X < ln[1].X ? ln[0] : ln[1];
+        let pt2 = ln[0].X < ln[1].X ? ln[1] : ln[0];
+        let bpt1 = box.NWCorner || box[0];
+        let bpt2 = box.SECorner || box[1];
+        let dx = (pt2.X - pt1.X);
+        let slope = (pt2.Y - pt1.Y) / dx;
+        let result = [];
+
+        if (!this.isAreaIntersects(ln, box) && !this.areaInsideArea(ln, box) && !this.isAreaIntersects(box, ln)) {
+            return null;
+        }
+        if (this.pointInsideArea(pt1, box)) {
+            result.push(pt1);
+        } else {
+            if (dx == 0) {
+                result.push({X: pt1.X, Y: bpt1.Y});
+            } else {
+                let y1 = slope * (bpt1.X - pt1.X);
+                let dy1 = bpt1.Y - pt1.Y;
+                let y2 = (bpt1.Y - pt1.Y) / slope;
+                let dy2 = y2 - pt1.Y;
+                if (dy1 < dy2) {
+                    result.push({X: bpt1.X, Y: y1});
+                } else {
+                    result.push({X: bpt1.X, Y: y2});
+                }
+            }
+        }
+
+        if (this.pointInsideArea(pt2, box)) {
+            result.push(pt2);
+        } else {
+            if (dx == 0) {
+                result.push({X: pt2.X, Y: bpt2.Y});
+            } else {
+                let y1 = slope * (bpt2.X - pt2.X);
+                let dy1 = bpt2.Y - pt2.Y;
+                let y2 = (bpt2.Y - pt2.Y) / slope;
+                let dy2 = y2 - pt2.Y;
+                if (dy1 < dy2) {
+                    result.push({X: bpt2.X, Y: y1});
+                } else {
+                    result.push({X: bpt2.X, Y: y2});
+                }
+            }
+        }
+
+        return result;
+    }
 }
 
-
-function requestMap(filename) {
-    console.time("Map load by renderer");
-    ipcRenderer.send('loadMap', {filename, Layers: ["LNDARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"]}); // "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
-}
-
-setupEnvironment();
+const mapRenderer = new MapRenderer();
+mapRenderer.setupEnvironment();
 
