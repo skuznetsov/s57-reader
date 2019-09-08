@@ -1,5 +1,7 @@
 const { ipcRenderer } = require('electron');
 
+const eps = 0.0000001;
+
 let colorClass = {
     "NODTA": xyZtoRGB(0.2800, 0.3100, 40.000),
     "CURSR": xyZtoRGB(0.5000, 0.4000, 32.000),
@@ -59,6 +61,8 @@ let colorClass = {
     "MARWH": xyZtoRGB(0.305, 0.344, 20.0)
 }
 
+const colorKeys = Object.keys(colorClass);
+
 let layerToColorClass = {
     "LNDARE": "LANDA",
     "DEPARE": "DEPMD",
@@ -92,7 +96,7 @@ function xyZtoRGB(_x, _y, _z) {
     return color;
 }
 
-const INITIAL_SCALE = 100;
+const INITIAL_SCALE = 3000;
 const STEP_MULTIPLIER = 0.25;
 
 class MapRenderer {
@@ -166,8 +170,8 @@ class MapRenderer {
             let offsetY = this.lastMouseY - event.layerY;
             this.lastMouseX = event.layerX;
             this.lastMouseY = event.layerY;
-            this.mapTopX = Math.max(0, Math.min(this.mapTopX + offsetX * this.mapScale, this.chart.SECorner.X)); // TODO: offset to the size of the screen
-            this.mapTopY = Math.max(0, Math.min(this.mapTopY + offsetY * this.mapScale, this.chart.SECorner.Y)); // TODO: offset to the size of the screen
+            this.mapTopX = Math.min(Math.max(this.mapTopX + offsetX * this.mapScale, 0), this.chart.SECorner.X - this.canvas.width * this.mapScale); // TODO: offset to the size of the screen
+            this.mapTopY = Math.min(Math.max(this.mapTopY + offsetY * this.mapScale, 0), this.chart.SECorner.Y - this.canvas.height * this.mapScale); // TODO: offset to the size of the screen
             this.renderMap();
             event.preventDefault();
         }
@@ -227,6 +231,17 @@ class MapRenderer {
         return bbox;
     }
 
+    normalizePoint(pt) {
+        let pt1 = {X: 0, Y: 0};
+        if (!pt) {
+            return pt1;
+        }
+        pt1.X = ~~((pt.X - this.mapTopX) / this.mapScale);
+        pt1.Y = ~~((pt.Y - this.mapTopY) / this.mapScale);
+
+        return pt1;
+    }
+
     renderMap() {
         let points = [];
         let screenBBox = {
@@ -244,7 +259,10 @@ class MapRenderer {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         for (let feature in this.chart.Features) {
-            let color = colorClass[layerToColorClass[feature]];
+            let color = "#000000";
+            if (feature in layerToColorClass) {
+                color = colorClass[layerToColorClass[feature]] || "#000000";
+            }
             for (let segment of this.chart.Features[feature]) {
                 this.ctx.fillStyle = color;
                 this.ctx.strokeStyle = color;
@@ -252,6 +270,7 @@ class MapRenderer {
                 let isFirstPoint = true;
                 this.ctx.beginPath();
                 let prevX = 0, prevY = 0;
+                let prevPt = null;
                 for (let child of segment.Children) {
                     let bbox = {
                         NWCorner: {X: 99999999, Y: 99999999},
@@ -265,21 +284,34 @@ class MapRenderer {
                     }
                     this.getBoundingBox(points, bbox);
 
-                    if (this.areaInsideOrIntersectsArea(bbox, screenBBox)) {
-                        let prevPt = null;
+                    if (this.areaInsideOrIntersectsArea(bbox, screenBBox) || this.areaInsideArea(screenBBox, bbox)) {
+                        if (prevPt ) {
+                            let pt = this.normalizePoint(points[0]);
+                            if (Math.abs(pt.X - prevPt.X) > 10 && Math.abs(pt.Y - prevPt.Y) > 10) {
+                                isFirstPoint = true;
+                                prevPt = null;
+                            }
+                        }
                         for (let pt of points) {
                             let pt1 = {X: 0, Y: 0};
-                            pt1.X = ~~((pt.X - this.mapTopX) / this.mapScale);
-                            pt1.Y = ~~((pt.Y - this.mapTopY) / this.mapScale);
-                            // x = Math.max(0, Math.min(this.canvas.width, x));
-                            // y = Math.max(0, Math.min(this.canvas.height, y));
+                            pt1 = this.normalizePoint(pt);
                             if (prevPt) {
                                 let ln = [prevPt, pt1];
                                 ln = this.calculateInterceptOfLineAndBox(ln, [{X:0, Y:0}, {X: this.canvas.width, Y: this.canvas.height}]);
-                                if (ln == null) {
-                                    continue;
+                                if (ln) {
+                                    pt1 = ln[1];
+                                } else {
+                                    pt1.X = Math.max(0, Math.min(pt1.X, this.canvas.width));
+                                    pt1.Y = Math.max(0, Math.min(pt1.Y, this.canvas.height));
                                 }
-                                pt1 = ln[1];
+                            } else {
+                                let ln = this.calculateInterceptOfLineAndBox([pt1, this.normalizePoint(points[1])], [{X:0, Y:0}, {X: this.canvas.width, Y: this.canvas.height}]);
+                                if (ln) {
+                                    pt1 = ln[0];
+                                } else {
+                                    pt1.X = Math.max(0, Math.min(pt1.X, this.canvas.width));
+                                    pt1.Y = Math.max(0, Math.min(pt1.Y, this.canvas.height));
+                                }
                             }
                             prevPt = pt1;
                             if (isFirstPoint) {
@@ -302,6 +334,7 @@ class MapRenderer {
                 }
             }
         }
+
         console.timeEnd("Renderer");
     }
 
@@ -350,7 +383,9 @@ class MapRenderer {
 
     requestMap(filename) {
         console.time("Map load by renderer");
-        ipcRenderer.send('loadMap', {filename, Layers: ["LNDARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"]}); // "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
+        ipcRenderer.send('loadMap', {filename, Layers: ["ADMARE","BCNSPP","BOYSPP","BUAARE","BUISGL","CBLSUB","COALNE","CONZNE","CTNARE","CTRPNT","DEPARE","DEPCNT","DMPGRD","EXEZNE","FSHZNE","LAKARE","LIGHTS","LNDARE","LNDELV","LNDMRK","LNDRGN","MORFAC","OBSTRN","OFSPLF","PILBOP","PILPNT","PRCARE","PRDARE","RDOSTA","RESARE","RIVERS","RTPBCN","SBDARE","SEAARE","SILTNK","SLCONS","SLOGRD","SLOTOP","TESARE","TWRTPT","UNSARE","UWTROC","WRECKS"]});
+        //Skin-of-Earth: "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
+        // All relevant: "ADMARE","BCNSPP","BOYSPP","BUAARE","BUISGL","CBLSUB","COALNE","CONZNE","CTNARE","CTRPNT","DEPARE","DEPCNT","DMPGRD","EXEZNE","FSHZNE","LAKARE","LIGHTS","LNDARE","LNDELV","LNDMRK","LNDRGN","MORFAC","OBSTRN","OFSPLF","PILBOP","PILPNT","PRCARE","PRDARE","RDOSTA","RESARE","RIVERS","RTPBCN","SBDARE","SEAARE","SILTNK","SLCONS","SLOGRD","SLOTOP","TESARE","TWRTPT","UNSARE","UWTROC","WRECKS"
     }
 
     pointInsideArea(pt, obj) {
@@ -394,55 +429,87 @@ class MapRenderer {
     }
 
     calculateInterceptOfLineAndBox(ln, box) {
-        let pt1 = ln[0].X < ln[1].X ? ln[0] : ln[1];
-        let pt2 = ln[0].X < ln[1].X ? ln[1] : ln[0];
-        let bpt1 = box.NWCorner || box[0];
-        let bpt2 = box.SECorner || box[1];
-        let dx = (pt2.X - pt1.X);
-        let slope = (pt2.Y - pt1.Y) / dx;
         let result = [];
 
         if (!this.isAreaIntersects(ln, box) && !this.areaInsideArea(ln, box) && !this.isAreaIntersects(box, ln)) {
             return null;
         }
-        if (this.pointInsideArea(pt1, box)) {
-            result.push(pt1);
-        } else {
-            if (dx == 0) {
-                result.push({X: pt1.X, Y: bpt1.Y});
-            } else {
-                let y1 = slope * (bpt1.X - pt1.X);
-                let dy1 = bpt1.Y - pt1.Y;
-                let y2 = (bpt1.Y - pt1.Y) / slope;
-                let dy2 = y2 - pt1.Y;
-                if (dy1 < dy2) {
-                    result.push({X: bpt1.X, Y: y1});
-                } else {
-                    result.push({X: bpt1.X, Y: y2});
-                }
-            }
+        if (this.areaInsideArea(ln, box)) { 
+            return ln;
         }
 
-        if (this.pointInsideArea(pt2, box)) {
-            result.push(pt2);
+        if (this.pointInsideArea(ln[0], box)) {
+            result.push(ln[0]);
         } else {
-            if (dx == 0) {
-                result.push({X: pt2.X, Y: bpt2.Y});
-            } else {
-                let y1 = slope * (bpt2.X - pt2.X);
-                let dy1 = bpt2.Y - pt2.Y;
-                let y2 = (bpt2.Y - pt2.Y) / slope;
-                let dy2 = y2 - pt2.Y;
-                if (dy1 < dy2) {
-                    result.push({X: bpt2.X, Y: y1});
-                } else {
-                    result.push({X: bpt2.X, Y: y2});
-                }
-            }
+            result.push(this.lineAndBoxIntersection(ln, box));
+        }
+
+        if (this.pointInsideArea(ln[1], box)) {
+            result.push(ln[1]);
+        } else {
+            result.push(this.lineAndBoxIntersection(ln, box));
         }
 
         return result;
     }
+
+    lineAndBoxIntersection(ln, box) {
+        let bp1 = box.NWCorner || box[0];
+        let bp2 = box.SECorner || box[1];
+        let p = this.segment_intersection(ln[0], ln[1], bp1, {X: bp2.X, Y: bp1.Y});
+        if (p) {
+            return p;
+        }
+        p = this.segment_intersection(ln[0], ln[1], {X: bp2.X, Y: bp1.Y}, bp2);
+        if (p) {
+            return p;
+        }
+        p = this.segment_intersection(ln[0], ln[1], bp2, {X: bp1.X, Y: bp2.Y});
+        if (p) {
+            return p;
+        }
+        p = this.segment_intersection(ln[0], ln[1], {X: bp1.X, Y: bp2.Y}, bp1);
+        if (p) {
+            return p;
+        }
+    }
+
+    between(a, b, c) {
+        return a-eps <= b && b <= c+eps;
+    }
+    
+    segment_intersection(p1, p2, p3, p4) {
+        var x=((p1.X*p2.Y-p1.Y*p2.X)*(p3.X-p4.X)-(p1.X-p2.X)*(p3.X*p4.Y-p3.Y*p4.X)) /
+                ((p1.X-p2.X)*(p3.Y-p4.Y)-(p1.Y-p2.Y)*(p3.X-p4.X));
+        var y=((p1.X*p2.Y-p1.Y*p2.X)*(p3.Y-p4.Y)-(p1.Y-p2.Y)*(p3.X*p4.Y-p3.Y*p4.X)) /
+                ((p1.X-p2.X)*(p3.Y-p4.Y)-(p1.Y-p2.Y)*(p3.X-p4.X));
+        if (isNaN(x)||isNaN(y)) {
+            return false;
+        } else {
+            if (p1.X>=p2.X) {
+                if (!this.between(p2.X, x, p1.X)) {return false;}
+            } else {
+                if (!this.between(p1.X, x, p2.X)) {return false;}
+            }
+            if (p1.Y>=p2.Y) {
+                if (!this.between(p2.Y, y, p1.Y)) {return false;}
+            } else {
+                if (!this.between(p1.Y, y, p2.Y)) {return false;}
+            }
+            if (p3.X>=p4.X) {
+                if (!this.between(p4.X, x, p3.X)) {return false;}
+            } else {
+                if (!this.between(p3.X, x, p4.X)) {return false;}
+            }
+            if (p3.Y>=p4.Y) {
+                if (!this.between(p4.Y, y, p3.Y)) {return false;}
+            } else {
+                if (!this.between(p3.Y, y, p4.Y)) {return false;}
+            }
+        }
+        return {X: x, Y: y};
+    }
+
 }
 
 const mapRenderer = new MapRenderer();

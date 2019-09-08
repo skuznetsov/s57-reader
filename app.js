@@ -34,6 +34,8 @@ async function createWindow () {
 
   ipcMain.on('loadTileNames', async function (event, args) {
     let dirNames = await fs.readdir('./data/ENC_ROOT');
+    dirNames = dirNames.filter(el => el.match(/^US.{6}$/));
+    dirNames.unshift('--Select Chart--');
     event.reply('tileNamesLoaded', dirNames);
   });
 
