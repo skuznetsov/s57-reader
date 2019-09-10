@@ -299,18 +299,23 @@ class MapRenderer {
         return pt1;
     }
 
+    calcDelta(a, b) {
+        if (!a || !b) return 9999999999;
+        return Math.abs(a.X - b.X) + Math.abs(a.Y - b.Y);
+    }
+
     renderMap() {
-        let points = [];
         let screenBBox = {
             NWCorner: {
                 X: this.mapTopX,
                 Y: this.mapTopY
             },
             SECorner: {
-                X: this.mapTopX + this.canvas.width * this.mapScale,
-                Y: this.mapTopY + this.canvas.height * this.mapScale
+                X: ~~(this.mapTopX + this.canvas.width * this.mapScale),
+                Y: ~~(this.mapTopY + this.canvas.height * this.mapScale)
             }
         };
+        let canvasBBox = [{X: 0, Y: 0}, {X: this.canvas.width, Y: this.canvas.height}];
 
         console.time("Renderer");
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -328,33 +333,42 @@ class MapRenderer {
                 this.ctx.beginPath();
                 let prevX = 0, prevY = 0;
                 let prevPt = null;
-                for (let child of segment.Children) {
-                    let bbox = {
-                        NWCorner: { X: 99999999, Y: 99999999 },
-                        SECorner: { X: 0, Y: 0 }
-                    };
+                let points = [];
+                let sub_segments = [];
+                let bbox = {
+                    NWCorner: { X: 99999999, Y: 99999999 },
+                    SECorner: { X: 0, Y: 0 }
+                };
 
+                for (let child of segment.Children) {
+                    let child_points;
                     if (child.Orientation == 2) {
-                        points = child.Points.reverse();
+                        child_points = child.Points.reverse();
                     } else {
-                        points = child.Points;
+                        child_points = child.Points;
                     }
+                    if (points.length > 0 && this.calcDelta(child_points[0], points[points.length - 1]) > 10) {
+                        sub_segments.push(points);
+                        points = [];
+                    } else {
+                        points = points.concat(child_points);
+                    }
+                }
+
+                if (sub_segments.length == 0) {
+                    sub_segments.push(points);
+                }
+
+                for (points of sub_segments) {
                     this.getBoundingBox(points, bbox);
 
-                    if (this.areaInsideOrIntersectsArea(bbox, screenBBox) || this.areaInsideOrIntersectsArea(screenBBox, bbox)) {
-                        if (prevPt) {
-                            let pt = this.normalizePoint(points[0]);
-                            if (Math.abs(pt.X - prevPt.X) > 0 && Math.abs(pt.Y - prevPt.Y) > 0) {
-                                isFirstPoint = true;
-                                prevPt = null;
-                            }
-                        }
+                    if (this.intersect(bbox, screenBBox)) {
+                        prevPt = null;
                         for (let pt of points) {
-                            let pt1 = { X: 0, Y: 0 };
-                            pt1 = this.normalizePoint(pt);
+                            let pt1 = this.normalizePoint(pt);
                             if (prevPt) {
                                 let ln = [prevPt, pt1];
-                                ln = this.calculateInterceptOfLineAndBox(ln, [{ X: 0, Y: 0 }, { X: this.canvas.width, Y: this.canvas.height }]);
+                                ln = this.calculateInterceptOfLineAndBox(ln, canvasBBox);
                                 if (ln) {
                                     pt1 = ln[1];
                                 } else {
@@ -364,7 +378,7 @@ class MapRenderer {
                             } else {
                                 let ln = [];
                                 if (segment.Geometry > 1) {
-                                    ln = this.calculateInterceptOfLineAndBox([pt1, this.normalizePoint(points[1])], [{ X: 0, Y: 0 }, { X: this.canvas.width, Y: this.canvas.height }]);
+                                    ln = this.calculateInterceptOfLineAndBox([pt1, this.normalizePoint(points[1])], canvasBBox);
                                 } else {
                                     ln = [pt1];
                                 }
@@ -380,10 +394,10 @@ class MapRenderer {
                                 if (isFirstPoint) {
                                     isFirstPoint = false;
                                     this.ctx.moveTo(pt1.X, pt1.Y);
-                                } else if (pt1.X != prevX || pt1.Y != prevY) {
+                                } else  { // if (pt1.X != prevX || pt1.Y != prevY) {
                                     this.ctx.lineTo(pt1.X, pt1.Y);
-                                    prevX = pt1.X;
-                                    prevY = pt1.Y;
+                                    // prevX = pt1.X;
+                                    // prevY = pt1.Y;
                                 }
                             } else {
                                 this.ctx.arc(pt1.X, pt1.Y, 3, 0, 2 * Math.PI);
@@ -394,12 +408,12 @@ class MapRenderer {
                             }
                         }
                     }
-                }
-                if (segment.Geometry == 3) {
-                    // this.ctx.fill();
-                    this.ctx.stroke();
-                } else {
-                    this.ctx.stroke();
+                    if (segment.Geometry == 3) {
+                        this.ctx.fill();
+                        this. ctx.stroke();
+                    } else {
+                        this.ctx.stroke();
+                    }
                 }
             }
         }
@@ -477,6 +491,18 @@ class MapRenderer {
         return false;
     }
 
+    intersect(a, b) {
+        let a_tl = a.NWCorner || a[0];
+        let a_br = a.SECorner || a[1];
+        let b_tl = b.NWCorner || b[0];
+        let b_br = b.SECorner || b[1];
+
+        return (a_tl.X <= b_br.X &&
+                b_tl.X <= a_br.X &&
+                a_tl.Y <= b_br.Y &&
+                b_tl.Y <= a_br.Y)
+      }
+
     areaInsideArea(obj1, obj2) {
         let pt1 = obj1.NWCorner || obj1[0];
         let pt2 = obj1.SECorner || obj1[1];
@@ -500,7 +526,7 @@ class MapRenderer {
     calculateInterceptOfLineAndBox(ln, box) {
         let result = [];
 
-        if (!this.isAreaIntersects(ln, box) && !this.areaInsideArea(ln, box) && !this.isAreaIntersects(box, ln)) {
+        if (!this.intersect(ln, box)) {
             return null;
         }
         if (this.areaInsideArea(ln, box)) {
