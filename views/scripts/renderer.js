@@ -139,12 +139,15 @@ function xyZtoRGB(_x, _y, _z) {
 
 const INITIAL_SCALE = 3000;
 const STEP_MULTIPLIER = 0.25;
+const CUTOFF_AREA_THRESHOLD = 150;
 
 class MapRenderer {
     constructor() {
         this.chart = null;
         this.ctx = null;
         this.canvas = null;
+        this.off_ctx = null;
+        this.off_canvas = null;
         this.tileSelector = null;
         this.mapX = 0;
         this.mapY = 0;
@@ -153,6 +156,15 @@ class MapRenderer {
         this.isMouseDown = false;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
+        this.canvasBBox = [{X: 0, Y: 0}, {X: 0, Y: 0}];
+    }
+
+    requestMap(filename) {
+        console.time("Map load by renderer");
+        // ipcRenderer.send('loadMap', { filename, Layers: ["LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"] });
+        ipcRenderer.send('loadMap', { filename, Layers: ["BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "LAKARE", "LIGHTS", "LNDARE", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "SLCONS", "TWRTPT"] });
+        //Skin-of-Earth: "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
+        // All relevant: "ADMARE", "BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "FSHZNE", "LAKARE", "LIGHTS", "LNDARE", "LNDELV", "LNDMRK", "LNDRGN", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "RESARE", "RIVERS", "RTPBCN", "SEAARE", "SLCONS", "SLOGRD", "SLOTOP", "TWRTPT", "UNSARE", "UWTROC", "WRECKS"
     }
 
     setupEnvironment() {
@@ -161,7 +173,7 @@ class MapRenderer {
             alert('No canvas element was found.');
             return;
         }
-        this.ctx = this.canvas.getContext('2d');
+        this.ctx = this.canvas.getContext('2d', {alpha: false});
         this.tileSelector = document.getElementById('tileNames');
         this.tileSelector.addEventListener('change', this.onSelectChange.bind(this));
 
@@ -186,7 +198,7 @@ class MapRenderer {
     zoom(event) {
         event.preventDefault();
         let oldMapScale = this.mapScale;
-        this.mapScale += ~~event.deltaY * STEP_MULTIPLIER;
+        this.mapScale = Math.abs(event.deltaY/Math.abs(event.deltaY) + 0.2) * this.mapScale;
 
         // Restrict scale
         this.mapScale = Math.min(Math.max(1, this.mapScale), 10000);
@@ -288,6 +300,11 @@ class MapRenderer {
         return bbox;
     }
 
+    getBoxArea(bbox) {
+        return ~~(((bbox.SECorner.X - bbox.NWCorner.X) / this.mapScale) * 
+                  ((bbox.SECorner.Y - bbox.NWCorner.Y) / this.mapScale));
+    }
+
     normalizePoint(pt) {
         let pt1 = { X: 0, Y: 0 };
         if (!pt) {
@@ -304,6 +321,17 @@ class MapRenderer {
         return Math.abs(a.X - b.X) + Math.abs(a.Y - b.Y);
     }
 
+    reverse(arr) {
+        let result = [];
+        let idx = arr.length - 1;
+
+        while(idx >= 0) {
+            result.push(arr[idx--]);
+        }
+        
+        return result;
+    }
+
     renderMap() {
         let screenBBox = {
             NWCorner: {
@@ -315,7 +343,7 @@ class MapRenderer {
                 Y: ~~(this.mapTopY + this.canvas.height * this.mapScale)
             }
         };
-        let canvasBBox = [{X: 0, Y: 0}, {X: this.canvas.width, Y: this.canvas.height}];
+        this.canvasBBox = [{X: 0, Y: 0}, {X: this.canvas.width, Y: this.canvas.height}];
 
         console.time("Renderer");
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -330,7 +358,6 @@ class MapRenderer {
                 this.ctx.strokeStyle = color;
                 this.ctx.lineWidth = 0.3;
                 let isFirstPoint = true;
-                this.ctx.beginPath();
                 let prevX = 0, prevY = 0;
                 let prevPt = null;
                 let points = [];
@@ -343,7 +370,7 @@ class MapRenderer {
                 for (let child of segment.Children) {
                     let child_points;
                     if (child.Orientation == 2) {
-                        child_points = child.Points.reverse();
+                        child_points = this.reverse(child.Points);
                     } else {
                         child_points = child.Points;
                     }
@@ -363,56 +390,37 @@ class MapRenderer {
                     this.getBoundingBox(points, bbox);
 
                     if (this.intersect(bbox, screenBBox)) {
+                        if (segment.Geometry != 1 && this.getBoxArea(bbox) <= CUTOFF_AREA_THRESHOLD) {
+                            continue;
+                        }
+                        this.ctx.beginPath();
                         prevPt = null;
-                        for (let pt of points) {
-                            let pt1 = this.normalizePoint(pt);
-                            if (prevPt) {
-                                let ln = [prevPt, pt1];
-                                ln = this.calculateInterceptOfLineAndBox(ln, canvasBBox);
-                                if (ln) {
-                                    pt1 = ln[1];
-                                } else {
-                                    pt1.X = Math.max(0, Math.min(pt1.X, this.canvas.width));
-                                    pt1.Y = Math.max(0, Math.min(pt1.Y, this.canvas.height));
-                                }
-                            } else {
-                                let ln = [];
-                                if (segment.Geometry > 1) {
-                                    ln = this.calculateInterceptOfLineAndBox([pt1, this.normalizePoint(points[1])], canvasBBox);
-                                } else {
-                                    ln = [pt1];
-                                }
-                                if (ln) {
-                                    pt1 = ln[0];
-                                } else {
-                                    pt1.X = Math.max(0, Math.min(pt1.X, this.canvas.width));
-                                    pt1.Y = Math.max(0, Math.min(pt1.Y, this.canvas.height));
-                                }
-                            }
-                            prevPt = pt1;
+                        isFirstPoint = true;
+                        for (let pt of this.clip(points)) {
                             if (segment.Geometry > 1) {
                                 if (isFirstPoint) {
                                     isFirstPoint = false;
-                                    this.ctx.moveTo(pt1.X, pt1.Y);
-                                } else  { // if (pt1.X != prevX || pt1.Y != prevY) {
-                                    this.ctx.lineTo(pt1.X, pt1.Y);
-                                    // prevX = pt1.X;
-                                    // prevY = pt1.Y;
+                                    this.ctx.moveTo(pt.X, pt.Y);
+                                } else  if (pt.X != prevX || pt.Y != prevY) {
+                                    this.ctx.lineTo(pt.X, pt.Y);
+                                    prevX = pt.X;
+                                    prevY = pt.Y;
                                 }
                             } else {
-                                this.ctx.arc(pt1.X, pt1.Y, 3, 0, 2 * Math.PI);
+                                this.ctx.arc(pt.X, pt.Y, 3, 0, 2 * Math.PI);
                                 this.ctx.fill();
                                 if ("OBJNAM" in segment.Attributes) {
-                                    this.ctx.fillText(segment.Attributes.OBJNAM.Value, pt1.X - 7, pt1.Y - 7);
+                                    this.ctx.fillText(segment.Attributes.OBJNAM, pt.X - 7, pt.Y - 7);
                                 }
                             }
                         }
-                    }
-                    if (segment.Geometry == 3) {
-                        this.ctx.fill();
-                        this. ctx.stroke();
-                    } else {
-                        this.ctx.stroke();
+                        if (segment.Geometry == 3) {
+                            this.ctx.closePath();
+                            this.ctx.fill();
+                            this. ctx.stroke();
+                        } else {
+                            this.ctx.stroke();
+                        }
                     }
                 }
             }
@@ -462,13 +470,6 @@ class MapRenderer {
             this.ctx.stroke();
         }
         console.timeEnd("Renderer");
-    }
-
-    requestMap(filename) {
-        console.time("Map load by renderer");
-        ipcRenderer.send('loadMap', { filename, Layers: ["BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "LAKARE", "LIGHTS", "LNDARE", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "SLCONS", "TWRTPT"] });
-        //Skin-of-Earth: "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
-        // All relevant: "ADMARE", "BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "FSHZNE", "LAKARE", "LIGHTS", "LNDARE", "LNDELV", "LNDMRK", "LNDRGN", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "RESARE", "RIVERS", "RTPBCN", "SEAARE", "SLCONS", "SLOGRD", "SLOTOP", "TWRTPT", "UNSARE", "UWTROC", "WRECKS"
     }
 
     pointInsideArea(pt, obj) {
@@ -523,29 +524,45 @@ class MapRenderer {
         return false;
     }
 
+    clip(poly) {
+        let result = [];
+        let pt = null, nextPt = null, intersectPt = {};
+        for (let idx = 0; idx < poly.length; idx++) {
+            if (!nextPt) {
+                pt = this.normalizePoint(poly[idx]);
+            }
+            if (idx < poly.length - 1) {
+                nextPt = this.normalizePoint(poly[idx]);
+                intersectPt = this.calculateInterceptOfLineAndBox([pt, nextPt], this.canvasBBox);
+            } else {
+                intersectPt.X = Math.max(0, Math.min(pt.X, this.canvas.width));
+                intersectPt.Y = Math.max(0, Math.min(pt.Y, this.canvas.height));
+            }
+
+            result.push({
+                X: intersectPt.X,
+                Y: intersectPt.Y
+            });
+
+            pt = nextPt;
+        }
+        return result;
+    }
+
     calculateInterceptOfLineAndBox(ln, box) {
         let result = [];
 
         if (!this.intersect(ln, box)) {
-            return null;
+            return {
+                X: Math.max(0, Math.min(ln[0].X, this.canvas.width)),
+                Y: Math.max(0, Math.min(ln[0].Y, this.canvas.height))
+            };
         }
         if (this.areaInsideArea(ln, box)) {
-            return ln;
+            return ln[0];
         }
 
-        if (this.pointInsideArea(ln[0], box)) {
-            result.push(ln[0]);
-        } else {
-            result.push(this.lineAndBoxIntersection(ln, box));
-        }
-
-        if (this.pointInsideArea(ln[1], box)) {
-            result.push(ln[1]);
-        } else {
-            result.push(this.lineAndBoxIntersection(ln, box));
-        }
-
-        return result;
+        return this.lineAndBoxIntersection(ln, box);
     }
 
     lineAndBoxIntersection(ln, box) {
