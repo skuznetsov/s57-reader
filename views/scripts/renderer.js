@@ -159,10 +159,10 @@ class MapRenderer {
         this.canvasBBox = [{X: 0, Y: 0}, {X: 0, Y: 0}];
     }
 
-    requestMap(filename) {
-        console.time("Map load by renderer");
-        // ipcRenderer.send('loadMap', { filename, Layers: ["LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"] });
-        ipcRenderer.send('loadMap', { filename, Layers: ["BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "LAKARE", "LIGHTS", "LNDARE", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "SLCONS", "TWRTPT"] });
+    requestMap(tileName) {
+    console.time("Map load by renderer");
+        // ipcRenderer.send('loadMap', { tileName, Layers: ["LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"] });
+        ipcRenderer.send('loadMap', { tileName, Layers: ["BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "LAKARE", "LIGHTS", "LNDARE", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "SLCONS", "TWRTPT"] });
         //Skin-of-Earth: "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
         // All relevant: "ADMARE", "BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "FSHZNE", "LAKARE", "LIGHTS", "LNDARE", "LNDELV", "LNDMRK", "LNDRGN", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "RESARE", "RIVERS", "RTPBCN", "SEAARE", "SLCONS", "SLOGRD", "SLOTOP", "TWRTPT", "UNSARE", "UWTROC", "WRECKS"
     }
@@ -190,15 +190,17 @@ class MapRenderer {
 
     onSelectChange(event) {
         let tileName = this.tileSelector.options[this.tileSelector.selectedIndex].text;
-        let filename = `data/ENC_ROOT/${tileName}/${tileName}.000`;
         this.mapScale = INITIAL_SCALE;
-        this.requestMap(filename);
+        this.requestMap(tileName);
     }
 
     zoom(event) {
         event.preventDefault();
         let oldMapScale = this.mapScale;
         this.mapScale = Math.abs(event.deltaY/Math.abs(event.deltaY) + 0.2) * this.mapScale;
+        if (Number.isNaN(this.mapScale)) {
+            this.mapScale = oldMapScale;
+        }
 
         // Restrict scale
         this.mapScale = Math.min(Math.max(1, this.mapScale), 10000);
@@ -242,7 +244,7 @@ class MapRenderer {
     onTileNamesLoaded(event, result) {
         this.tileSelector.options.length = 0;
         for (let idx = 0; idx < result.length; idx++) {
-            var opt = document.createElement("option");
+            let opt = document.createElement("option");
             opt.value = idx;
             opt.innerHTML = result[idx];
 
@@ -291,11 +293,29 @@ class MapRenderer {
     }
 
     getBoundingBox(points, bbox) {
-        for (let pt of points) {
+        let ignoreUpdates = !!bbox;
+        if (!points) {
+            return [];
+        }
+        if (!ignoreUpdates && points.bbox) {
+            return Object.assign({},points.bbox);
+        }
+
+        bbox = bbox || {
+            NWCorner: { X: 99999999, Y: 99999999 },
+            SECorner: { X: 0, Y: 0 }
+        };
+
+        for (let idx = 0; idx < points.length; idx++) {
+            let pt = points[idx];
             bbox.NWCorner.X = Math.min(bbox.NWCorner.X, pt.X);
             bbox.NWCorner.Y = Math.min(bbox.NWCorner.Y, pt.Y);
             bbox.SECorner.X = Math.max(bbox.SECorner.X, pt.X);
             bbox.SECorner.Y = Math.max(bbox.SECorner.Y, pt.Y);
+        }
+
+        if (!ignoreUpdates && points.length > 5) {
+            points.bbox = bbox;
         }
         return bbox;
     }
@@ -353,65 +373,38 @@ class MapRenderer {
             if (feature in layerToColorClass) {
                 color = colorClass[layerToColorClass[feature]] || "#000000";
             }
+            this.ctx.fillStyle = color;
+            this.ctx.strokeStyle = color;// feature == "DEPARE" ? colorClass.CHRED: color;
+            this.ctx.lineWidth = 0.5;
+
             for (let segment of this.chart.Features[feature]) {
-                this.ctx.fillStyle = color;
-                this.ctx.strokeStyle = color;
-                this.ctx.lineWidth = 0.3;
                 let isFirstPoint = true;
-                let prevX = 0, prevY = 0;
-                let prevPt = null;
-                let points = [];
-                let sub_segments = [];
-                let bbox = {
-                    NWCorner: { X: 99999999, Y: 99999999 },
-                    SECorner: { X: 0, Y: 0 }
-                };
 
                 for (let child of segment.Children) {
-                    let child_points;
-                    if (child.Orientation == 2) {
-                        child_points = this.reverse(child.Points);
-                    } else {
-                        child_points = child.Points;
-                    }
-                    if (points.length > 0 && this.calcDelta(child_points[0], points[points.length - 1]) > 10) {
-                        sub_segments.push(points);
-                        points = [];
-                    } else {
-                        points = points.concat(child_points);
-                    }
-                }
+                    let points = child.Points;
+                    let pointsBBox = this.getBoundingBox(points);
 
-                if (sub_segments.length == 0) {
-                    sub_segments.push(points);
-                }
-
-                for (points of sub_segments) {
-                    this.getBoundingBox(points, bbox);
-
-                    if (this.intersect(bbox, screenBBox)) {
-                        if (segment.Geometry != 1 && this.getBoxArea(bbox) <= CUTOFF_AREA_THRESHOLD) {
+                    if (this.intersect(pointsBBox, screenBBox)) {
+                        if (segment.Geometry == 3 && this.getBoxArea(pointsBBox) <= CUTOFF_AREA_THRESHOLD) {
                             continue;
                         }
                         this.ctx.beginPath();
-                        prevPt = null;
-                        isFirstPoint = true;
-                        for (let pt of this.clip(points)) {
-                            if (segment.Geometry > 1) {
+                        if (segment.Geometry > 1) {
+                            isFirstPoint = true;
+                            for (let pt of this.clip(points, this.canvasBBox)) {
                                 if (isFirstPoint) {
                                     isFirstPoint = false;
                                     this.ctx.moveTo(pt.X, pt.Y);
-                                } else  if (pt.X != prevX || pt.Y != prevY) {
+                                } else {
                                     this.ctx.lineTo(pt.X, pt.Y);
-                                    prevX = pt.X;
-                                    prevY = pt.Y;
                                 }
-                            } else {
-                                this.ctx.arc(pt.X, pt.Y, 3, 0, 2 * Math.PI);
-                                this.ctx.fill();
-                                if ("OBJNAM" in segment.Attributes) {
-                                    this.ctx.fillText(segment.Attributes.OBJNAM, pt.X - 7, pt.Y - 7);
-                                }
+                            }
+                        } else {
+                            let pt = this.normalizePoint(points[0]);
+                            this.ctx.arc(pt.X, pt.Y, 3, 0, 2 * Math.PI);
+                            this.ctx.fill();
+                            if ("OBJNAM" in segment.Attributes) {
+                                this.ctx.fillText(segment.Attributes.OBJNAM, pt.X - 7, pt.Y - 7);
                             }
                         }
                         if (segment.Geometry == 3) {
@@ -502,7 +495,51 @@ class MapRenderer {
                 b_tl.X <= a_br.X &&
                 a_tl.Y <= b_br.Y &&
                 b_tl.Y <= a_br.Y)
-      }
+    }
+
+    pointToBoxSectionCode(pt, box) {
+        let tl = box.NWCorner || box[0];
+        let br = box.SECorner || box[1];
+
+        if (tl.X <= pt.X && pt.X <= br.X &&
+            tl.Y <= pt.Y && pt.Y <= br.Y) {
+            return 9;
+        }
+        if (pt.X < tl.X && pt.Y < tl.Y) { // Top-Left Quadrant
+            return 1;
+        }
+
+        if (pt.X < tl.X && pt.Y > br.Y) { // Top-Right Quadrant
+            return 3;
+        }
+
+        if (pt.X > br.X && pt.Y < tl.Y) { // Bottom-Left Quadrant
+            return 7;
+        }
+
+        if (pt.X < br.X && pt.Y > br.Y) { // Bottom-Right Quadrant
+            return 5;
+        }
+
+        if (pt.X < tl.X) { // Top Quadrant
+            return 2;
+        }
+
+        if (pt.X > br.X) { // Bottom Quadrant
+            return 6;
+        }
+
+        if (pt.Y < tl.Y) { // Left Quadrant
+            return 8;
+        }
+
+        if (pt.Y > br.Y) { // Right Quadrant
+            return 4;
+        }
+
+        // Not possible case: throw the exception
+        throw new Error("Not possile case encountered in pointToBoxSectionCode");
+    }
 
     areaInsideArea(obj1, obj2) {
         let pt1 = obj1.NWCorner || obj1[0];
@@ -524,40 +561,90 @@ class MapRenderer {
         return false;
     }
 
-    clip(poly) {
-        let result = [];
-        let pt = null, nextPt = null, intersectPt = {};
-        for (let idx = 0; idx < poly.length; idx++) {
-            if (!nextPt) {
-                pt = this.normalizePoint(poly[idx]);
+    copyPoint(pt) {
+        let copiedPt = {X: pt.X, Y: pt.Y};
+        return copiedPt;
+    }
+
+    clip(pointsList) {
+        let poly = [], result = [];
+        let prevPt = null, pt = null, nextPt = null, intersectPt = {};
+        for (let p of pointsList) {
+            let pt = this.normalizePoint(p);
+            if (prevPt && prevPt.X == pt.X && prevPt.Y == pt.Y) {
+                continue;
             }
-            if (idx < poly.length - 1) {
-                nextPt = this.normalizePoint(poly[idx]);
-                intersectPt = this.calculateInterceptOfLineAndBox([pt, nextPt], this.canvasBBox);
+            if (poly.length > 1) {
+                let pt_2 = poly[poly.length - 2];
+                let pt_1 = poly[poly.length - 1];
+                if ((pt.X == pt_1.X && pt.X == pt_2.X) ||
+                    (pt.Y == pt_1.Y && pt.Y == pt_2.Y)) {
+                    pt_1.X = pt.X;
+                    pt_1.Y = pt.Y;
+                } else {
+                    poly.push(pt);
+                }
             } else {
-                intersectPt.X = Math.max(0, Math.min(pt.X, this.canvas.width));
-                intersectPt.Y = Math.max(0, Math.min(pt.Y, this.canvas.height));
+                poly.push(pt);
             }
-
-            result.push({
-                X: intersectPt.X,
-                Y: intersectPt.Y
-            });
-
-            pt = nextPt;
+            prevPt = pt;
         }
-        return result;
+
+        // prevPt = {}
+        // for (let idx = 0; idx < poly.length; idx++) {
+        //     if (!nextPt) {
+        //         pt = poly[idx];
+        //         prevPt = this.copyPoint(pt);
+        //     }
+        //     if (idx < poly.length - 1) {
+        //         nextPt = poly[idx];
+        //         intersectPt = this.calculateInterceptOfLineAndBox([pt, nextPt], this.canvasBBox);
+        //         if (!intersectPt) {
+        //             intersectPt = {X: Math.max(0, Math.min(pt.X, this.canvas.width)),
+        //                            Y: Math.max(0, Math.min(pt.Y, this.canvas.height))};
+        //         }
+        //     } else {
+        //         intersectPt.X = Math.max(0, Math.min(pt.X, this.canvas.width));
+        //         intersectPt.Y = Math.max(0, Math.min(pt.Y, this.canvas.height));
+        //     }
+
+        //     if (result.length > 1) {
+        //         let pt_2 = result[result.length - 2];
+        //         let pt_1 = result[result.length - 1];
+        //         let pt = intersectPt;
+        //         if ((pt.X == pt_1.X && pt.X == pt_2.X) ||
+        //             (pt.Y == pt_1.Y && pt.Y == pt_2.Y)) {
+        //             pt_1.X = pt.X;
+        //             pt_1.Y = pt.Y;
+        //         } else {
+        //             result.push({
+        //                 X: intersectPt.X,
+        //                 Y: intersectPt.Y
+        //             });
+        //         }
+        //     } else {
+        //         result.push({
+        //             X: intersectPt.X,
+        //             Y: intersectPt.Y
+        //         });
+        //     }
+        //     prevPt = pt;
+        //     pt = nextPt;
+        // }
+        // result = this.polygonclip(poly, this.canvasBBox);
+        // return result;
+        return poly;
     }
 
     calculateInterceptOfLineAndBox(ln, box) {
         let result = [];
 
-        if (!this.intersect(ln, box)) {
-            return {
-                X: Math.max(0, Math.min(ln[0].X, this.canvas.width)),
-                Y: Math.max(0, Math.min(ln[0].Y, this.canvas.height))
-            };
-        }
+        // if (!this.intersect(ln, box)) {
+        //     return {
+        //         X: Math.max(0, Math.min(ln[0].X, this.canvas.width)),
+        //         Y: Math.max(0, Math.min(ln[0].Y, this.canvas.height))
+        //     };
+        // }
         if (this.areaInsideArea(ln, box)) {
             return ln[0];
         }
@@ -591,9 +678,9 @@ class MapRenderer {
     }
 
     segment_intersection(p1, p2, p3, p4) {
-        var x = ((p1.X * p2.Y - p1.Y * p2.X) * (p3.X - p4.X) - (p1.X - p2.X) * (p3.X * p4.Y - p3.Y * p4.X)) /
+        let x = ((p1.X * p2.Y - p1.Y * p2.X) * (p3.X - p4.X) - (p1.X - p2.X) * (p3.X * p4.Y - p3.Y * p4.X)) /
             ((p1.X - p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X - p4.X));
-        var y = ((p1.X * p2.Y - p1.Y * p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X * p4.Y - p3.Y * p4.X)) /
+        let y = ((p1.X * p2.Y - p1.Y * p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X * p4.Y - p3.Y * p4.X)) /
             ((p1.X - p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X - p4.X));
         if (isNaN(x) || isNaN(y)) {
             return false;
@@ -622,6 +709,144 @@ class MapRenderer {
         return { X: x, Y: y };
     }
 
+    // Cohen-Sutherland line clippign algorithm, adapted to efficiently
+    // handle polylines rather than just segments
+
+    lineclip(pointsList, bbox) {
+
+        let points = [];
+        let prevPt = null;
+        for (let p of pointsList) {
+            let pt = this.normalizePoint(p);
+            if (prevPt && prevPt.X == pt.X && prevPt.Y == pt.Y) {
+                continue;
+            }
+            points.push(pt);
+            prevPt = pt;
+        }
+
+        let len = points.length,
+            codeA = this.bitCode(points[0], bbox),
+            result = [],
+            part = [],
+            i, a, b, codeB, lastCode;
+
+        for (i = 1; i < len; i++) {
+            a = points[i - 1];
+            b = points[i];
+            codeB = lastCode = this.bitCode(b, bbox);
+
+            while (true) {
+                if (!(codeA | codeB)) { // accept
+                    part.push(a);
+
+                    if (codeB !== lastCode) { // segment went outside
+                        part.push(b);
+
+                        if (i < len - 1) { // start a new line
+                            result.push(part);
+                            part = [];
+                        }
+                    } else if (i === len - 1) {
+                        part.push(b);
+                    }
+                    break;
+
+                } else if (codeA & codeB) { // trivial reject
+                    break;
+
+                } else if (codeA) { // a outside, intersect with clip edge
+                    a = this.intersectBox(a, b, codeA, bbox);
+                    codeA = this.bitCode(a, bbox);
+
+                } else { // b outside
+                    b = this.intersectBox(a, b, codeB, bbox);
+                    codeB = this.bitCode(b, bbox);
+                }
+            }
+
+            codeA = lastCode;
+        }
+
+        return part;
+    }
+
+// Sutherland-Hodgeman polygon clipping algorithm
+
+    polygonclip(points, bbox) {
+        let result, edge, prev, prevInside, i, p, inside;
+
+        // clip against each side of the clip rectangle
+        for (edge = 1; edge <= 8; edge *= 2) {
+            result = [];
+            prev = points[points.length - 1];
+            prevInside = !(this.bitCode(prev, bbox) & edge);
+
+            for (i = 0; i < points.length; i++) {
+                p = points[i];
+                inside = !(this.bitCode(p, bbox) & edge);
+
+                // if segment goes through the clip window, add an intersection
+                if (inside !== prevInside) result.push(this.intersectBox(prev, p, edge, bbox));
+
+                if (inside) result.push(p); // add a point if it's inside
+
+                prev = p;
+                prevInside = inside;
+            }
+
+            points = result;
+
+            if (!points.length) break;
+        }
+
+        return result;
+    }
+
+    // Returns x-value of point of intersectipn of two 
+    // lines 
+    xIntersect(p1, p2, p3, p4) { 
+        let num = (p1.X * p2.Y - p1.Y * p2.X) * (p3.X - p4.X) - 
+                  (p1.X - p2.X) * (p3.X * p4.Y - p3.Y * p4.X); 
+        let den = (p1.X - p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X - p4.X); 
+        return num / den; 
+    } 
+
+    // Returns y-value of point of intersectipn of 
+    // two lines 
+    yIntersect(p1, p2, p3, p4) { 
+        let num = (p1.X * p2.Y - p1.Y * p2.X) * (p3.X - p4.X) - 
+                    (p1.Y - p2.Y) * (p3.X * p4.Y - p3.Y * p4.X); 
+        let den = (p1.X - p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X - p4.X); 
+        return num / den; 
+    } 
+
+    // intersect a segment against one of the 4 lines that make up the bbox
+
+    intersectBox(a, b, edge, bbox) {
+        let box = bbox.NWCorner ? [bbox.NWCorner, bbox.SECorner] : bbox;
+        return edge & 8 ? {X: ~~(a.Х + (b.Х - a.Х) * (box[1].Y - a.Y) / (b.Y - a.Y)), Y: ~~(box[1].Y)} : // top
+            edge & 4 ? {X: ~~(a.Х + (b.Х - a.Х) * (box[0].Y - a.Y) / (b.Y - a.Y)), Y: ~~(box[0].Y)} : // bottom
+            edge & 2 ? {X: ~~(box[1].X), Y: ~~(a.Y + (b.Y - a.Y) * (box[1].X - a.Х) / (b.Х - a.Х))} : // right
+            edge & 1 ? {X: ~~(box[0].X), Y: ~~(a.Y + (b.Y - a.Y) * (box[0].X - a.X) / (b.X - a.X))} : null; // left
+    }
+
+// bit code reflects the point position relative to the bbox:
+
+//         left  mid  right
+//    top  1001  1000  1010
+//    mid  0001  0000  0010
+// bottom  0101  0100  0110
+    bitCode(p, bbox) {
+        let code = 0;
+        let box = bbox.NWCorner ? [bbox.NWCorner, bbox.SECorner] : bbox;
+
+        if (p.X < box[0].X) code |= 1; // left
+        else if (p.X > box[1].X) code |= 2; // right
+
+        if (p.Y > box[1].Y) code |= 4; // bottom
+        else if (p.Y < box[0].Y) code |= 8; // top
+    }
 }
 
 const mapRenderer = new MapRenderer();

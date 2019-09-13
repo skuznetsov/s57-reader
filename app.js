@@ -25,7 +25,7 @@ async function createWindow () {
   mainWindow.loadFile('views/index.html');
 
   ipcMain.on('loadMap', async function (event, args) {
-    let loader = new MapReader({filename: args.filename});
+    let loader = new MapReader({baseDir: 'data/ENC_ROOT/', tileName: args.tileName});
     console.time("loader.read()");
     chart = await loader.read(args.Layers);
     console.timeEnd("loader.read()");
