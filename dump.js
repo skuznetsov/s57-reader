@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-const MapReader = require('./lib/MapReader');
+const ISO8211Reader = require('./lib/ISO8211Reader');
 
-let loader = new MapReader({debug: true, filename: process.argv[2]});
-loader.read();
+async function dumpFile(filename) {
+    let reader = new ISO8211Reader(filename, {debug: true});
+    await reader.process();
+}
+
+dumpFile(process.argv[2]);

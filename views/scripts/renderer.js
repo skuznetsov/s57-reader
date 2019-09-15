@@ -160,7 +160,7 @@ class MapRenderer {
     }
 
     requestMap(tileName) {
-    console.time("Map load by renderer");
+        console.time("Map load by renderer");
         // ipcRenderer.send('loadMap', { tileName, Layers: ["LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"] });
         ipcRenderer.send('loadMap', { tileName, Layers: ["BUAARE", "BUISGL", "CBLSUB", "COALNE", "CTNARE", "DEPARE", "DEPCNT", "DMPGRD", "LAKARE", "LIGHTS", "LNDARE", "MORFAC", "OBSTRN", "OFSPLF", "PILBOP", "PILPNT", "PRCARE", "PRDARE", "RDOSTA", "SLCONS", "TWRTPT"] });
         //Skin-of-Earth: "LNDARE", "DEPARE", "DRGARE", "FLODOC", "HULKES", "PONTON", "UNSARE"
