@@ -184,8 +184,14 @@ class MapRenderer {
 
         ipcRenderer.on('tileNamesLoaded', this.onTileNamesLoaded.bind(this));
         ipcRenderer.on('mapLoaded', this.onMapLoaded.bind(this));
+        ipcRenderer.on('S52Parsed', this.onS52Parsed.bind(this));
 
         ipcRenderer.send('loadTileNames');
+        ipcRenderer.send('parseS52');
+    }
+
+    onS52Parsed(s52data) {
+        this.s52data = s52data;
     }
 
     onSelectChange(event) {

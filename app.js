@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const MapReader = require('./lib/MapReader');
 const CatalogReader = require('./lib/CatalogReader');
+const S52Parser = require('./lib/S52Parser');
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
@@ -31,6 +32,13 @@ async function createWindow () {
     console.timeEnd("loader.read()");
     event.reply('mapLoaded', chart);
   });
+  
+  ipcMain.on('parseS52', async function (event, args) {
+    let s52parser = new S52Parser();
+    let data = await s52parser.parse();
+    event.reply('S52Parsed', data);
+  });
+
 
   ipcMain.on('loadTileNames', async function (event, args) {
     let dirNames = await fs.readdir('./data/ENC_ROOT');
@@ -46,11 +54,8 @@ async function createWindow () {
   //   event.reply('catalogLoaded', catalog);
   // });
 
-
-
-
   // Open the DevTools.
-  // mainWindow.webContents.openDevTools()
+  mainWindow.webContents.openDevTools()
 
   // Emitted when the window is closed.
   mainWindow.on('closed', function () {
