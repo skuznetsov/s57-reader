@@ -268,11 +268,11 @@ class MapRenderer {
         this.mapTopY = this.chart.NWCorner.Y;
         let width = this.chart.SECorner.X - this.chart.NWCorner.X;
         let height = this.chart.SECorner.Y - this.chart.NWCorner.Y;
-        if (width > height) {
-            this.mapScale = width / this.canvas.width;
-        } else {
-            this.mapScale = height / this.canvas.height;
-        }
+        // if (width > height) {
+        //     this.mapScale = ~~(width / this.canvas.width);
+        // } else {
+        //     this.mapScale = ~~(height / this.canvas.height);
+        // }
         this.renderMap();
     }
 
@@ -424,6 +424,9 @@ class MapRenderer {
                 }
             }
         }
+        this.ctx.fillStyle = '#000000';
+        this.ctx.textStyle = '18px';
+        this.ctx.fillText(`Map Scale: 1:${~~(this.mapScale * 10)}`, 10, 10);
 
         console.timeEnd("Renderer");
     }
