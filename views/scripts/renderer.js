@@ -2,143 +2,7 @@ const { ipcRenderer } = require('electron');
 
 const eps = 0.0000001;
 
-let colorClass = {
-    "NODTA": xyZtoRGB(0.2800, 0.3100, 40.000),
-    "CURSR": xyZtoRGB(0.5000, 0.4000, 32.000),
-    "CHBLK": xyZtoRGB(0.2800, 0.3100, 0.000),
-    "CHGRD": xyZtoRGB(0.2800, 0.3100, 10.000),
-    "CHGRF": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "CHRED": xyZtoRGB(0.4800, 0.3000, 25.000),
-    "CHGRN": xyZtoRGB(0.3100, 0.5600, 60.000),
-    "CHYLW": xyZtoRGB(0.4100, 0.4900, 70.000),
-    "CHMGD": xyZtoRGB(0.3000, 0.1700, 20.000),
-    "CHMGF": xyZtoRGB(0.2800, 0.2400, 48.000),
-    "CHBRN": xyZtoRGB(0.3900, 0.4300, 30.000),
-    "CHWHT": xyZtoRGB(0.2800, 0.3100, 80.000),
-    "SCLBR": xyZtoRGB(0.5000, 0.4000, 32.000),
-    "CHCOR": xyZtoRGB(0.5000, 0.4000, 32.000),
-    "LITRD": xyZtoRGB(0.4800, 0.3000, 25.000),
-    "LITGN": xyZtoRGB(0.3100, 0.5600, 60.000),
-    "LITYW": xyZtoRGB(0.4100, 0.4900, 70.000),
-    "ISDNG": xyZtoRGB(0.3000, 0.1700, 20.000),
-    "DNGHL": xyZtoRGB(0.4800, 0.3000, 25.000),
-    "TRFCD": xyZtoRGB(0.3000, 0.1700, 20.000),
-    "TRFCF": xyZtoRGB(0.2800, 0.2400, 48.000),
-    "LANDA": xyZtoRGB(0.3500, 0.3900, 50.000),
-    "LANDF": xyZtoRGB(0.4500, 0.4200, 15.000),
-    "CSTLN": xyZtoRGB(0.2800, 0.3100, 10.000),
-    "SNDG1": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "SNDG2": xyZtoRGB(0.2800, 0.3100, 0.000),
-    "DEPSC": xyZtoRGB(0.2800, 0.3100, 10.000),
-    "DEPCN": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "DEPDW": xyZtoRGB(0.2800, 0.3100, 80.000),
-    "DEPMD": xyZtoRGB(0.2600, 0.2900, 65.000),
-    "DEPMS": xyZtoRGB(0.2300, 0.2500, 55.000),
-    "DEPVS": xyZtoRGB(0.2100, 0.2200, 45.000),
-    "DEPIT": xyZtoRGB(0.2600, 0.3600, 35.000),
-    "RADHI": xyZtoRGB(0.3100, 0.5600, 60.000),
-    "RADLO": xyZtoRGB(0.3100, 0.5600, 20.000),
-    "ARPAT": xyZtoRGB(0.2600, 0.4200, 30.000),
-    "NINFO": xyZtoRGB(0.5000, 0.4000, 32.000),
-    "RESBL": xyZtoRGB(0.1800, 0.1500, 22.000),
-    "ADINF": xyZtoRGB(0.4100, 0.4900, 35.000),
-    "RESGR": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "SHIPS": xyZtoRGB(0.2800, 0.3100, 0.000),
-    "PSTRK": xyZtoRGB(0.2800, 0.3100, 0.000),
-    "SYTRK": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "PLRTE": xyZtoRGB(0.5800, 0.3500, 18.000),
-    "APLRT": xyZtoRGB(0.5000, 0.4000, 32.000),
-    "OUTLW": xyZtoRGB(0.2800, 0.3100, 0.000),
-    "OUTLL": xyZtoRGB(0.4500, 0.4200, 15.000),
-    "RES01": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "RES02": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "RES03": xyZtoRGB(0.2800, 0.3100, 25.000),
-    "BKAJ1": xyZtoRGB(0.2800, 0.3100, 0.600),
-    "BKAJ2": xyZtoRGB(0.2800, 0.3100, 1.600),
-    "MARBL": xyZtoRGB(0.145, 0.140, 20.0),
-    "MARCY": xyZtoRGB(0.200, 0.355, 20.0),
-    "MARMG": xyZtoRGB(0.360, 0.220, 20.0),
-    "MARWH": xyZtoRGB(0.305, 0.344, 20.0)
-}
-
-const colorKeys = Object.keys(colorClass);
-
-let layerToColorClass = {
-    "LNDARE": "LANDA",
-    "DEPARE": "DEPMD",
-    "DRGARE": "LANDF",
-    "FLODOC": "CSTLN",
-    "HULKES": "SNDG1",
-    "PONTON": "SNDG2",
-    "UNSARE": "DEPSC",
-
-    "ADMARE": "SCLBR",
-    "BCNSPP": "CHCOR",
-    "BOYSPP": "LITRD",
-    "BUAARE": "LITGN",
-    "BUISGL": "LITYW",
-    "CBLSUB": "ISDNG",
-    "COALNE": "DNGHL",
-    "CONZNE": "TRFCD",
-    "CTNARE": "TRFCF",
-    "CTRPNT": "CHGRD",
-    "DEPCNT": "DEPSC",
-    "DMPGRD": "CHGRF",
-    "EXEZNE": "CHRED",
-    "FSHZNE": "CHGRN",
-    "LAKARE": "CHYLW",
-    "LIGHTS": "DEPCN",
-    "LNDELV": "DEPDW",
-    "LNDMRK": "CHMGF",
-    "LNDRGN": "DEPMS",
-    "MORFAC": "DEPVS",
-    "OBSTRN": "DEPIT",
-    "OFSPLF": "RADHI",
-    "PILBOP": "RADLO",
-    "PILPNT": "ARPAT",
-    "PRCARE": "NINFO",
-    "PRDARE": "RESBL",
-    "RDOSTA": "ADINF",
-    "RESARE": "RESGR",
-    "RIVERS": "SHIPS",
-    "RTPBCN": "PSTRK",
-    "SBDARE": "SYTRK",
-    "SEAARE": "PLRTE",
-    "SILTNK": "APLRT",
-    "SLCONS": "OUTLW",
-    "SLOGRD": "OUTLL",
-    "SLOTOP": "RES01",
-    "TESARE": "RES02",
-    "TWRTPT": "RES03",
-    "UWTROC": "BKAJ1",
-    "WRECKS": "BKAJ2"
-};
-
-function adj(C) {
-    if (Math.abs(C) < 0.0031308) {
-        return 12.92 * C;
-    }
-    return 1.055 * Math.pow(C, 0.41666) - 0.055;
-}
-function xyZtoRGB(_x, _y, _z) {
-
-    _z /= 100;
-    let x = _x * (_z / _y);
-    let y = _z;
-    let z = (1 - _x - _y) * (_z / _y);
-
-    let r = 3.2404542 * x - 1.5371385 * y - 0.4985314 * z;
-    let g = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z;
-    let b = 0.0556434 * x - 0.2040259 * y + 1.0572252 * z;
-    r = ~~(adj(r) * 255);
-    g = ~~(adj(g) * 255);
-    b = ~~(adj(b) * 255);
-    let color = '#' + Buffer.from([r, g, b]).toString('hex').toUpperCase();
-    return color;
-}
-
 const INITIAL_SCALE = 3000;
-const STEP_MULTIPLIER = 0.25;
 const CUTOFF_AREA_THRESHOLD = 150;
 
 class MapRenderer {
@@ -156,6 +20,8 @@ class MapRenderer {
         this.isMouseDown = false;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
+        this.ColorTableName = "DAY";
+        this.ColorTable = null;
         this.canvasBBox = [{X: 0, Y: 0}, {X: 0, Y: 0}];
     }
 
@@ -190,8 +56,9 @@ class MapRenderer {
         ipcRenderer.send('parseS52');
     }
 
-    onS52Parsed(s52data) {
-        this.s52data = s52data;
+    onS52Parsed(event, S52Parser) {
+        this.S52Parser = S52Parser;
+        this.ColorTable = this.S52Parser.ColorTables[this.ColorTableName];
     }
 
     onSelectChange(event) {
@@ -358,6 +225,30 @@ class MapRenderer {
         return result;
     }
 
+    getSortedFeatureNames() {
+        let featureNames = Object.keys(this.chart.Features);
+        featureNames.sort((a,b) => { 
+            let aPriority = this.S52Parser.Layers[a].DisplayPriority;
+            let bPriority = this.S52Parser.Layers[b].DisplayPriority;
+            return bPriority - aPriority;
+        });
+
+        return featureNames;
+    }
+    getColorForLayer(layer) {
+        let module = this.S52Parser.Layers[layer];
+        let instr = module.SymbologyInstruction;
+        let color = "#000000";
+        if (instr.ShowLine) {
+            color = this.ColorTable[instr.ShowLine.Color];
+        } else if (instr.ShowPoint) {
+            let symb = this.S52Parser.Symbols[instr.ShowPoint.Symbol];
+            color = Object.values(symb.Colors)[0];
+            color = this.ColorTable[color].HexColor;
+        }
+        return color;
+    }
+
     renderMap() {
         let screenBBox = {
             NWCorner: {
@@ -374,13 +265,10 @@ class MapRenderer {
         console.time("Renderer");
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        for (let feature in this.chart.Features) {
-            let color = "#000000";
-            if (feature in layerToColorClass) {
-                color = colorClass[layerToColorClass[feature]] || "#000000";
-            }
+        for (let feature of this.getSortedFeatureNames()) {
+            let color = this.getColorForLayer(feature);
             this.ctx.fillStyle = color;
-            this.ctx.strokeStyle = color;// feature == "DEPARE" ? colorClass.CHRED: color;
+            this.ctx.strokeStyle = color;
             this.ctx.lineWidth = 0.5;
 
             for (let segment of this.chart.Features[feature]) {

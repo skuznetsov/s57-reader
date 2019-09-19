@@ -35,8 +35,8 @@ async function createWindow () {
   
   ipcMain.on('parseS52', async function (event, args) {
     let s52parser = new S52Parser();
-    let data = await s52parser.parse();
-    event.reply('S52Parsed', data);
+    await s52parser.parse();
+    event.reply('S52Parsed', s52parser);
   });
 
 
